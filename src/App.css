@@ -1,0 +1,124 @@
+import React, { useEffect, useRef, useState } from "react";
+
+export default function App() {
+  const [status, setStatus] = useState("Ready");
+  const [selectedBeat, setSelectedBeat] = useState("");
+  const [percussionList, setPercussionList] = useState<any[]>([]);
+  const [tanpuraList, setTanpuraList] = useState<any[]>([]);
+
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const currentSource = useRef<AudioBufferSourceNode | null>(null);
+
+  const ensureAudio = async () => {
+    if (!audioContextRef.current) {
+      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+      audioContextRef.current = new Ctx();
+    }
+    if (audioContextRef.current.state === "suspended") {
+      await audioContextRef.current.resume();
+    }
+    return audioContextRef.current;
+  };
+
+  const fetchBuffer = async (url: string) => {
+    const ctx = await ensureAudio();
+    const res = await fetch(url);
+    const arr = await res.arrayBuffer();
+    return await ctx.decodeAudioData(arr);
+  };
+
+  const loadManifests = async () => {
+    try {
+      const p = await fetch("/audio/percussion/manifest.json");
+      const pdata = await p.json();
+      setPercussionList(pdata);
+
+      const t = await fetch("/audio/tanpura/manifest.json");
+      const tdata = await t.json();
+      setTanpuraList(tdata);
+
+      if (pdata.length > 0) setSelectedBeat(pdata[0].file);
+
+      setStatus("Audio loaded");
+    } catch {
+      setStatus("Failed to load manifest");
+    }
+  };
+
+  useEffect(() => {
+    loadManifests();
+  }, []);
+
+  const stopAudio = () => {
+    try {
+      currentSource.current?.stop();
+    } catch {}
+    currentSource.current = null;
+    setStatus("Stopped");
+  };
+
+  const playLoop = async (path: string) => {
+    stopAudio();
+    try {
+      const ctx = await ensureAudio();
+      const buffer = await fetchBuffer(path);
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      source.connect(ctx.destination);
+      source.start();
+
+      currentSource.current = source;
+      setStatus("Playing " + path);
+    } catch {
+      setStatus("Error playing file");
+    }
+  };
+
+  const playPercussion = async () => {
+    if (!selectedBeat) return;
+    await playLoop(`/audio/percussion/${selectedBeat}`);
+  };
+
+  const playTanpura = async () => {
+    if (tanpuraList.length === 0) {
+      setStatus("No tanpura file");
+      return;
+    }
+    const file = tanpuraList[0].file;
+    await playLoop(`/audio/tanpura/${file}`);
+  };
+
+  return (
+    <div style={{ padding: 40, background: "#1b1717", color: "white", minHeight: "100vh" }}>
+      <h1>SwarPulse Web Audio v3</h1>
+
+      <h2>Percussion</h2>
+      <select
+        value={selectedBeat}
+        onChange={(e) => setSelectedBeat(e.target.value)}
+      >
+        {percussionList.map((p) => (
+          <option key={p.file} value={p.file}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+
+      <div style={{ marginTop: 10 }}>
+        <button onClick={playPercussion}>Play Beat</button>
+        <button onClick={stopAudio} style={{ marginLeft: 10 }}>
+          Stop
+        </button>
+      </div>
+
+      <h2 style={{ marginTop: 30 }}>Tanpura</h2>
+      <button onClick={playTanpura}>Start Tanpura</button>
+
+      <div style={{ marginTop: 30 }}>
+        <b>Status:</b> {status}
+      </div>
+    </div>
+  );
+}
